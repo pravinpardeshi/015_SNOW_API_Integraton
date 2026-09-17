@@ -46,6 +46,7 @@ A complete, hands-on integration with **ServiceNow (PDI)** using **OAuth 2.0 Cli
 **Connection**
 - OAuth 2.0 Client Credentials flow against `oauth_token.do` – no username/password in code
 - Connect form (instance URL, Client ID/Secret), live connection status with token countdown, disconnect
+- Token is **reused for as long as possible** and persisted to a flat file (`.snow_token.json`), so repeat Connect clicks and other ServiceNow callers on the same host don't mint a new token during the validity window — a fresh token is fetched only when none (usable) exists
 - Credentials pre-filled from defaults; overridable via environment variables
 
 **Incidents card**
@@ -104,7 +105,15 @@ A complete, hands-on integration with **ServiceNow (PDI)** using **OAuth 2.0 Cli
                                                      └──────────────────┘
 ```
 
-The browser never sees the Client Secret after connecting – the FastAPI backend holds the token in memory and proxies all Table API calls. Core ServiceNow logic is ported 1:1 from `testServiceNow.py` (`get_access_token`, `get_incidents`, `create_incident`, `update_incident`).
+The browser never sees the Client Secret after connecting – the FastAPI backend holds the token in memory **and mirrors it to a flat file (`.snow_token.json`)** and proxies all Table API calls. Core ServiceNow logic is ported 1:1 from `testServiceNow.py` (`get_access_token`, `get_incidents`, `create_incident`, `update_incident`).
+
+### Token validity & reuse
+
+- The validity window comes from ServiceNow: the `expires_in` (seconds) field in the `oauth_token.do` response (typically ~30 min; `app.py` falls back to 1800s if the field is absent).
+- The backend reuses the cached token while `now + SNOW_TOKEN_SKEW (default 60s) < expires_at`, refreshing slightly *before* real expiry so in-flight requests never use a dying token.
+- Cache file: `.snow_token.json` next to `app.py` (override with `SNOW_TOKEN_FILE`). It stores the token, absolute `expires_at`, instance, client ID, and a SHA-256 hash of the secret (the secret itself is never written to disk). Written atomically with `0600` permissions.
+- Other ServiceNow callers on the same host can reuse the token instead of minting their own: `from app import get_valid_token` returns a `(token, reused)` pair, minting a fresh token only when needed.
+- `POST /api/disconnect` clears the in-memory token **and** deletes the cache file.
 
 ## ✅ Prerequisites
 
@@ -160,6 +169,9 @@ cp .env.example .env   # then edit .env with your values
 SNOW_INSTANCE=https://devXXXXXX.service-now.com
 SNOW_CLIENT_ID=your-client-id
 SNOW_CLIENT_SECRET=your-client-secret
+# Optional: flat-file OAuth token cache shared across calls/processes
+# SNOW_TOKEN_FILE=.snow_token.json
+# SNOW_TOKEN_SKEW=60
 ```
 
 | Variable | Description | Example |
@@ -167,6 +179,8 @@ SNOW_CLIENT_SECRET=your-client-secret
 | `SNOW_INSTANCE` | Base URL of your PDI, no trailing slash | `https://dev389543.service-now.com` |
 | `SNOW_CLIENT_ID` | OAuth Application Registry Client ID | `35e3f36a…` |
 | `SNOW_CLIENT_SECRET` | OAuth Application Registry Client Secret | `4fQYK0DZ…` |
+| `SNOW_TOKEN_FILE` | Path of the flat-file token cache (shared/reused across calls) | `.snow_token.json` |
+| `SNOW_TOKEN_SKEW` | Seconds before real expiry to treat the token as expired | `60` |
 
 Both `app.py` and `testServiceNow.py` call `load_dotenv()` on startup and fail with a clear message if the ID/secret are missing. Shell-exported `SNOW_*` variables also work (environment takes precedence over `.env`). The web UI's Connect form starts empty — paste the values from `.env` to connect. `.env` is git-ignored; commit only `.env.example`.
 
@@ -178,6 +192,7 @@ venv/
 __pycache__/
 *.pyc
 .env
+.snow_token.json
 *.log
 ```
 
@@ -195,7 +210,7 @@ Then open:
 - **Interactive API docs (Swagger):** <http://localhost:8090/docs>
 - **Health:** `curl http://localhost:8090/api/status`
 
-> The token lives in server memory – restarting the server disconnects you; just hit **Connect** again in the UI.
+> The token is cached in memory and in `.snow_token.json` – restarting the server picks up the still-valid cached token automatically; use **Disconnect** (or delete the file) to force a fresh token.
 
 ## 🖱 Using the Web UI
 
@@ -214,8 +229,8 @@ Base URL: `http://localhost:8090`. All incident routes require a prior `POST /ap
 |--------|----------|-------------|
 | `GET` | `/` | Web UI |
 | `GET` | `/api/status` | `{connected, instance, expires_in, last_error}` |
-| `POST` | `/api/connect` | `{instance, client_id, client_secret}` → fetches & caches Bearer token |
-| `POST` | `/api/disconnect` | Drop the cached token |
+| `POST` | `/api/connect` | `{instance, client_id, client_secret}` → reuses the cached Bearer token when still valid (`reused: true`), otherwise fetches & caches a new one |
+| `POST` | `/api/disconnect` | Drop the cached token (memory + cache file) |
 | `GET` | `/api/incidents?limit=&offset=&active_only=&search=&order_by=` | List incidents. `order_by` e.g. `-opened_at`, `number`, `priority`. Returns `{result, has_next, offset, limit}` |
 | `GET` | `/api/incidents/{sys_id}` | Single incident (with `sysparm_display_value=all`, so references resolve to names) |
 | `POST` | `/api/incidents` | Create. Requires `short_description`; accepts `description, urgency, impact, priority, category, assignment_group, assigned_to, state, comments, work_notes, …` |
@@ -252,7 +267,7 @@ curl -X PATCH http://localhost:8090/api/incidents/<sys_id> -H "Content-Type: app
 2. **No total count from the Table API**, so pagination is Prev/Next with server-detected `has_next` (one extra row fetched, then trimmed) – no "Page N of M".
 3. **Journal via the record, not `sys_journal_field`** – the OAuth user typically can't read that table (returns `[]`), so the activity timeline parses `comments_and_work_notes` from the incident itself.
 4. **Single-record fetches use `sysparm_display_value=all`** – even `sys_id`/`number` arrive as `{display_value, value}` objects; the frontend normalizes them (this once caused an `[object Object]` bug – now guarded on both sides).
-5. **In-memory token** – server restarts disconnect you; tokens also expire (~30 min) and need a reconnect.
+5. **Cached token, auto-refresh** – the token is reused while valid (memory + `.snow_token.json` flat file, shared across restarts and other local callers) and refreshed automatically ~60s before expiry (`SNOW_TOKEN_SKEW`); expired tokens no longer need a manual reconnect.
 
 ## 📜 Script Usage (testServiceNow.py)
 
@@ -325,6 +340,7 @@ Incident sys_id: 22f5f0f247dbc7102784e454116d437e
 ```
 025_ServiceNow_Cloud/
 ├── app.py                     # FastAPI backend (port 8090) – connect + incident CRUD proxy
+├── .snow_token.json           # Flat-file OAuth token cache (auto-created, git-ignored, 0600)
 ├── run.sh                     # Starter: uvicorn app:app on 0.0.0.0:8090
 ├── testServiceNow.py          # Original demo script: OAuth + list + create + update
 ├── pyproject.toml             # Project metadata + deps (fastapi, uvicorn, requests, pydantic)
@@ -348,6 +364,7 @@ Checklist:
 
 - [ ] Regenerate Client Secret in ServiceNow after this demo
 - [ ] Remove hardcoded secrets, use `SNOW_*` env vars / `.env` (add `.env` to `.gitignore`)
+- [ ] Never commit `.snow_token.json` (live bearer token; already in `.gitignore`, stored `0600`, secret stored as hash only)
 - [ ] Enable GitHub **secret scanning / push protection**
 - [ ] Restrict OAuth scope / roles to minimum needed (`rest_service`, table ACLs)
 - [ ] Use short-lived tokens; never log full tokens
@@ -357,7 +374,7 @@ Checklist:
 | Symptom | Likely cause / fix |
 |---------|-------------------|
 | `401 Unauthorized` on `oauth_token.do` | Wrong Client ID/Secret or extra whitespace. Regenerate secret and retry. |
-| `401 Not connected. POST /api/connect first` | Server restarted (in-memory token lost) or token expired – hit **Connect** again. |
+| `401 Not connected. POST /api/connect first` | No usable token and no credentials to mint one – hit **Connect** again (a still-valid `.snow_token.json` is picked up automatically after restarts). |
 | Priority change "doesn't stick" | ServiceNow recalculates Priority from Urgency × Impact – set those two instead (see Gotchas). |
 | `No Record found — Record doesn't exist or ACL…` | Bad `sys_id` (e.g. record deleted, or a stale ID). Refresh the list and retry; the UI now validates IDs first. |
 | `Invalid sys_id '[object Object]'` | Stale frontend – hard-refresh (Ctrl+Shift+R) so the fixed JS loads. |
@@ -377,7 +394,8 @@ Checklist:
 - [x] Update with Priority-recalculation warning; friendly error unwrapping; `sys_id` validation
 - [x] Light/Dark themes, Inter font
 - [ ] Load config from `.env` via `python-dotenv`
-- [ ] Persistent token cache / multi-user sessions (currently in-memory, single user)
+- [x] Persistent token cache (flat file, reused across calls/restarts/processes) with auto-refresh
+- [ ] Multi-user sessions (currently single user)
 - [ ] `argparse` CLI for the script (`list`, `create`, `get`, `update`, `delete`)
 - [ ] Wrap in a reusable `ServiceNowClient` class with auto token-refresh
 - [ ] `pytest` + mock tests and GitHub Actions CI
