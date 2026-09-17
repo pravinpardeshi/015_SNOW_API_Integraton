@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ServiceNow Incident Manager – Python + FastAPI + Web UI
 
 A complete, hands-on integration with **ServiceNow (PDI)** using **OAuth 2.0 Client Credentials** and the **Table API (`/api/now/table/incident`)**:
@@ -409,3 +410,6 @@ Part of a hands-on Cloud + ITSM integration series (alongside JIRA Cloud, AWS, G
 ---
 
 ⭐ If this starter helped you, give it a star and use it as a base for Incident automation, SRE bots, or LLM tool integrations with ServiceNow.
+=======
+# 015_SNOW_API_Integraton
+>>>>>>> fcc122b24307b59624ee5ceaf5109c3c61b472f8

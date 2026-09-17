@@ -15,6 +15,9 @@ or:
 
 import os
 import time
+import json
+import hashlib
+import threading
 from typing import Any, Optional
 
 import requests
@@ -35,6 +38,24 @@ DEFAULT_CLIENT_SECRET = os.getenv("SNOW_CLIENT_SECRET", "")
 
 REQUEST_TIMEOUT = 30
 
+# ---------------------------------------------------------------------------
+# Token cache: reuse the OAuth token for as long as possible.
+# The token is persisted to a flat file so that:
+#   1. it survives app restarts, and
+#   2. other ServiceNow callers on this host can reuse it instead of
+#      minting a new token on every call during its validity window.
+# Override the location with SNOW_TOKEN_FILE if needed.
+# ---------------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TOKEN_FILE = os.getenv(
+    "SNOW_TOKEN_FILE", os.path.join(BASE_DIR, ".snow_token.json")
+)
+# Refresh slightly before real expiry so in-flight requests never use a
+# token that dies mid-call.
+TOKEN_EXPIRY_SKEW = int(os.getenv("SNOW_TOKEN_SKEW", "60"))
+
+_token_lock = threading.Lock()
+
 app = FastAPI(
     title="ServiceNow Manager",
     description="FastAPI backend + UI to interact with ServiceNow (incidents).",
@@ -42,14 +63,216 @@ app = FastAPI(
 )
 
 # In-memory connection state (single-user demo; use sessions/DB for multi-user)
+# Mirrored to TOKEN_FILE so the token survives restarts and can be shared
+# with other ServiceNow callers on this host.
 _state: dict[str, Any] = {
     "instance": DEFAULT_INSTANCE,
     "client_id": DEFAULT_CLIENT_ID,
     "client_secret": DEFAULT_CLIENT_SECRET,
     "access_token": None,
     "expires_at": 0.0,
+    "token_type": "Bearer",
     "last_error": None,
 }
+
+
+# ---------------------------------------------------------------------------
+# Token cache helpers (flat-file persistence + reuse)
+# ---------------------------------------------------------------------------
+def _hash_secret(secret: str) -> str:
+    return hashlib.sha256((secret or "").encode("utf-8")).hexdigest()
+
+
+def _token_usable(expires_at: float) -> bool:
+    """True if the token is still valid beyond the safety skew."""
+    try:
+        return bool(expires_at) and (time.time() + TOKEN_EXPIRY_SKEW) < float(expires_at)
+    except (TypeError, ValueError):
+        return False
+
+
+def _load_token_file() -> Optional[dict]:
+    """Read the cached token from disk. Returns None if missing/invalid."""
+    try:
+        with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+    if not isinstance(data, dict) or not data.get("access_token"):
+        return None
+    return data
+
+
+def _save_token_file(
+    *,
+    access_token: str,
+    expires_at: float,
+    expires_in: int,
+    instance: str,
+    client_id: str,
+    client_secret: str,
+    token_type: str = "Bearer",
+    scope: Optional[str] = None,
+) -> None:
+    """Atomically persist the token so other processes can reuse it."""
+    payload = {
+        "access_token": access_token,
+        "expires_at": expires_at,
+        "expires_in": expires_in,
+        "token_type": token_type,
+        "scope": scope,
+        "instance": instance,
+        "client_id": client_id,
+        # Store only a hash — enough to detect credential changes
+        # without writing the secret itself to disk.
+        "client_secret_hash": _hash_secret(client_secret),
+        "obtained_at": time.time(),
+    }
+    tmp_path = f"{TOKEN_FILE}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_path, TOKEN_FILE)
+        try:
+            os.chmod(TOKEN_FILE, 0o600)
+        except OSError:
+            pass
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _clear_token_file() -> None:
+    try:
+        if os.path.exists(TOKEN_FILE):
+            os.remove(TOKEN_FILE)
+    except OSError:
+        pass
+
+
+def _promote_cached_to_state(cached: dict) -> None:
+    """Copy a file-cached token into in-memory state (no secret in file)."""
+    _state.update(
+        {
+            "instance": cached.get("instance") or _state["instance"],
+            "client_id": cached.get("client_id") or _state.get("client_id"),
+            "access_token": cached.get("access_token"),
+            "expires_at": float(cached.get("expires_at") or 0),
+            "token_type": cached.get("token_type") or "Bearer",
+            "last_error": None,
+        }
+    )
+
+
+def _sync_state_from_file() -> bool:
+    """If memory has no usable token, try to pick up the file-cached one."""
+    if _token_usable(_state.get("expires_at", 0)) and _state.get("access_token"):
+        return True
+    cached = _load_token_file()
+    if cached and _token_usable(cached.get("expires_at", 0)):
+        _promote_cached_to_state(cached)
+        return True
+    return False
+
+
+def _store_token_payload(
+    payload: dict, *, instance: str, client_id: str, client_secret: str
+) -> int:
+    """Save a fresh OAuth payload to memory + disk. Returns expires_in."""
+    token = payload.get("access_token")
+    if not token:
+        raise HTTPException(status_code=502, detail=f"No access_token in response: {payload}")
+    expires_in = int(payload.get("expires_in", 1800))
+    expires_at = time.time() + expires_in  # raw expiry; skew applied on read
+    token_type = payload.get("token_type", "Bearer")
+    scope = payload.get("scope")
+    _state.update(
+        {
+            "instance": instance,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "access_token": token,
+            "expires_at": expires_at,
+            "token_type": token_type,
+            "last_error": None,
+        }
+    )
+    _save_token_file(
+        access_token=token,
+        expires_at=expires_at,
+        expires_in=expires_in,
+        instance=instance,
+        client_id=client_id,
+        client_secret=client_secret,
+        token_type=token_type,
+        scope=scope,
+    )
+    return expires_in
+
+
+def get_valid_token(
+    instance: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+) -> tuple[str, bool]:
+    """Return a usable (token, reused) pair, minting a new one only if needed.
+
+    Reuse order: valid in-memory token -> valid flat-file token ->
+    fresh OAuth request. Other ServiceNow callers can import this function
+    (or just read TOKEN_FILE) instead of requesting a token per call.
+    """
+    with _token_lock:
+        instance = _clean_instance(instance or _state.get("instance") or DEFAULT_INSTANCE)
+        client_id = client_id or _state.get("client_id") or DEFAULT_CLIENT_ID
+        client_secret = client_secret or _state.get("client_secret") or DEFAULT_CLIENT_SECRET
+
+        # 1. Reuse in-memory token if it matches these credentials
+        # (instance + client_id + secret must all match).
+        if (
+            _state.get("access_token")
+            and _token_usable(_state.get("expires_at", 0))
+            and _clean_instance(_state.get("instance", "")) == instance
+            and (_state.get("client_id") or "") == (client_id or "")
+            and _hash_secret(_state.get("client_secret") or "") == _hash_secret(client_secret or "")
+        ):
+            return _state["access_token"], True
+
+        # 2. Reuse flat-file token (covers restarts + other processes that
+        #    already refreshed it) when instance/client/secret still match.
+        cached = _load_token_file()
+        if cached and _token_usable(cached.get("expires_at", 0)):
+            same_instance = _clean_instance(cached.get("instance", "")) == instance
+            same_id = (cached.get("client_id") or "") == (client_id or "")
+            same_secret = (cached.get("client_secret_hash") or "") == _hash_secret(client_secret or "")
+            if same_instance and same_id and same_secret:
+                _promote_cached_to_state(cached)
+                # Keep the secret in memory for future auto-refreshes.
+                _state["client_secret"] = client_secret
+                return cached["access_token"], True
+
+        # 3. No usable token — mint exactly one fresh token.
+        if not client_id or not client_secret:
+            raise HTTPException(
+                status_code=401, detail="Not connected. POST /api/connect first."
+            )
+        payload = get_access_token(instance, client_id, client_secret)
+        _store_token_payload(
+            payload, instance=instance, client_id=client_id, client_secret=client_secret
+        )
+        return _state["access_token"], False
+
+
+# Pick up a still-valid token persisted by a previous run at import time.
+_sync_state_from_file()
 
 
 # ---------------------------------------------------------------------------
@@ -129,13 +352,11 @@ def get_access_token(instance: str, client_id: str, client_secret: str) -> dict:
 
 
 def _auth_headers() -> tuple[str, dict]:
-    if not _state["access_token"]:
-        raise HTTPException(status_code=401, detail="Not connected. POST /api/connect first.")
-    if _state["expires_at"] and time.time() > _state["expires_at"]:
-        raise HTTPException(status_code=401, detail="Token expired. Reconnect via POST /api/connect.")
+    """Build auth headers, reusing the cached token and refreshing only if needed."""
+    token, _reused = get_valid_token()
     instance = _clean_instance(_state["instance"])
     headers = {
-        "Authorization": f"Bearer {_state['access_token']}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
@@ -167,7 +388,6 @@ def _check_sys_id(sys_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Static / UI
 # ---------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 
@@ -189,9 +409,9 @@ def index():
 # ---------------------------------------------------------------------------
 @app.get("/api/status")
 def api_status():
-    connected = bool(_state["access_token"]) and not (
-        _state["expires_at"] and time.time() > _state["expires_at"]
-    )
+    # Pick up a token persisted by another process/previous run, if any.
+    _sync_state_from_file()
+    connected = bool(_state.get("access_token")) and _token_usable(_state.get("expires_at", 0))
     return {
         "connected": connected,
         "instance": _state["instance"],
@@ -202,36 +422,30 @@ def api_status():
 
 @app.post("/api/connect")
 def api_connect(body: ConnectRequest):
-    instance = _clean_instance(body.instance)
-    if not body.client_id or not body.client_secret:
+    instance = _clean_instance(body.instance or _state.get("instance") or DEFAULT_INSTANCE)
+    client_id = body.client_id or _state.get("client_id") or DEFAULT_CLIENT_ID
+    client_secret = body.client_secret or _state.get("client_secret") or DEFAULT_CLIENT_SECRET
+    if not client_id or not client_secret:
         raise HTTPException(status_code=400, detail="client_id and client_secret are required.")
-    payload = get_access_token(instance, body.client_id, body.client_secret)
-    token = payload.get("access_token")
-    if not token:
-        raise HTTPException(status_code=502, detail=f"No access_token in response: {payload}")
-    expires_in = int(payload.get("expires_in", 1800))
-    _state.update(
-        {
-            "instance": instance,
-            "client_id": body.client_id,
-            "client_secret": body.client_secret,
-            "access_token": token,
-            "expires_at": time.time() + expires_in - 30,
-            "last_error": None,
-        }
-    )
+    # Reuse the cached token when credentials are unchanged and it is
+    # still valid — this avoids minting a new token on every Connect click.
+    token, reused = get_valid_token(instance, client_id, client_secret)
+    expires_in = max(0, int(_state["expires_at"] - time.time()))
     return {
         "ok": True,
-        "instance": instance,
+        "instance": _state["instance"],
         "expires_in": expires_in,
-        "token_type": payload.get("token_type", "Bearer"),
+        "token_type": _state.get("token_type", "Bearer"),
+        "reused": reused,
     }
 
 
 @app.post("/api/disconnect")
 def api_disconnect():
-    _state["access_token"] = None
-    _state["expires_at"] = 0.0
+    with _token_lock:
+        _state["access_token"] = None
+        _state["expires_at"] = 0.0
+        _clear_token_file()
     return {"ok": True}
 
 
