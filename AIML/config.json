@@ -1,0 +1,34 @@
+{
+  "services": ["gateway", "auth", "orders", "payments", "inventory", "notify"],
+  "log_file": "logs/microservices_1h.log",
+  "baseline_file": "models/baseline.json",
+  "alerts_file": "alerts.log",
+  "train_window": [5, 29],
+  "failure_window": [45, 49],
+  "restart_minute": 50,
+  "thresholds": {"watch": 2.5, "warning": 4.0, "critical": 6.0},
+  "predict_streak": 3,
+  "cloudwatch": {
+    "region": "us-east-1",
+    "log_groups": {
+      "gateway": "/ecs/prod/gateway",
+      "auth": "/ecs/prod/auth",
+      "orders": "/ecs/prod/orders",
+      "payments": "/ecs/prod/payments",
+      "inventory": "/ecs/prod/inventory",
+      "notify": "/ecs/prod/notify"
+    },
+    "metric_namespace": "AWS/ECS",
+    "cluster": "prod",
+    "pool_metric": null,
+    "poll_interval": 65,
+    "train_minutes": 30
+  },
+  "ml": {
+    "train_seeds": [1, 2, 3, 4, 5],
+    "horizon": 10,
+    "proba_threshold": 0.6,
+    "contamination": 0.02
+  },
+  "normal_fp_allow": 0
+}

@@ -1,0 +1,54 @@
+{
+  "calibration": {
+    "gateway": {
+      "watch": -0.010380106515198525,
+      "warning": 0.018029796689003508,
+      "critical": 0.02704469503350526
+    },
+    "auth": {
+      "watch": -0.010531473566511353,
+      "warning": 0.04435246128383874,
+      "critical": 0.06652869192575811
+    },
+    "orders": {
+      "watch": -0.008710373514884741,
+      "warning": 0.018682230324859495,
+      "critical": 0.028023345487289242
+    },
+    "payments": {
+      "watch": -0.016686582975513686,
+      "warning": 0.05209089304268444,
+      "critical": 0.07813633956402666
+    },
+    "inventory": {
+      "watch": -0.03696858010992166,
+      "warning": 0.042636041936172764,
+      "critical": 0.06395406290425915
+    },
+    "notify": {
+      "watch": -0.039752026299114236,
+      "warning": 0.04359780166960936,
+      "critical": 0.06539670250441404
+    }
+  },
+  "rf": {
+    "oob_score": 1.0,
+    "train_precision": 1.0,
+    "train_recall": 1.0,
+    "positives": 300,
+    "samples": 1620
+  },
+  "horizon": 10,
+  "proba_threshold": 0.6,
+  "contamination": 0.02,
+  "base_features": [
+    "count",
+    "err_rate",
+    "p95",
+    "avg_lat",
+    "cpu",
+    "mem",
+    "pool"
+  ],
+  "window": 3
+}

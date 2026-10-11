@@ -3,19 +3,38 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ServiceNow Manager</title>
+<title>SNow Manager</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+<div class="shell">
+<aside class="sidenav">
+  <div class="side-brand"><span class="logo sm">SN</span><span>SNow<br/>Manager</span></div>
+  <nav>
+    <button class="nav-item active" data-view="view-dashboard" title="Dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Dashboard</button>
+    <button class="nav-item" data-view="view-obs" title="Observability"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Observability</button>
+    <button class="nav-item" data-view="view-ew" title="Early Warning"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>Early Warn</button>
+    <button class="nav-item" data-view="view-connect" title="Connect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7a5 5 0 0 1 0-10h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Connect</button>
+    <button class="nav-item" data-view="view-incidents" title="Incidents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Incidents</button>
+    <button class="nav-item" data-view="view-custom" title="Custom Table"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>Custom Table</button>
+    <button class="nav-item" data-view="view-current" title="Current"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Current</button>
+    <button class="nav-item" data-view="view-sync" title="Sync"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>Sync</button>
+    <button class="nav-item" data-view="view-rag" title="Chat with RAG"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 12h5"/></svg>Chat with RAG</button>
+  </nav>
+  <div class="side-foot muted small">RAG · resolved tickets</div>
+</aside>
+<div class="main">
 <header class="topbar">
+  <button id="btnNav" class="btn ghost sm nav-toggle" title="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
   <div class="brand">
     <span class="logo">SN</span>
     <div>
-      <h1>ServiceNow Manager</h1>
-      <p>FastAPI · Incidents · port 8090</p>
+      <h1>SNow Manager</h1>
+      <p>Incidents · Sync · RAG</p>
     </div>
   </div>
   <div class="topbar-right">
@@ -29,52 +48,117 @@
 </header>
 
 <main class="layout">
-  <!-- Connection panel -->
+  <!-- Dashboard: landing page -->
+  <div id="view-dashboard" class="view">
   <section class="card">
-    <h2>1 · Connect to ServiceNow</h2>
-    <p class="muted">OAuth <code>client_credentials</code> flow — same as <code>get_access_token()</code> in testServiceNow.py. Credentials live in the server's <code>.env</code> file — paste them here to connect.</p>
+    <div class="dash-head">
+      <h2>Dashboard</h2>
+      <button id="btnDashRefresh" class="btn primary sm">Refresh</button>
+    </div>
+    <div class="stat-grid dash-grid">
+      <div class="stat-card dash-conn">
+        <span class="k">Connection</span>
+        <b id="dashConn"><span class="dot offline"></span> …</b>
+        <span class="sub" id="dashConnSub">—</span>
+        <div class="row dash-conn-btns">
+          <button id="btnDashConnect" class="btn primary sm">Connect</button>
+          <button id="btnDashDisconnect" class="btn ghost sm">Disconnect</button>
+          <button id="btnDashAdvanced" class="btn ghost sm">Advanced</button>
+        </div>
+        <span id="dashConnMsg" class="msg"></span>
+      </div>
+      <div class="stat-card"><span class="k">Open tickets · ServiceNow</span><b id="dashOpen">—</b><span class="sub" id="dashOpenSub">—</span></div>
+      <div class="stat-card"><span class="k">Triaged</span><b id="dashTriaged">—</b><span class="sub" id="dashTriagedSub">—</span></div>
+      <div class="stat-card"><span class="k">Needs triage</span><b id="dashPending">—</b><span class="sub">in local current table</span></div>
+      <div class="stat-card"><span class="k">Unsupported</span><b id="dashUnsup">—</b><span class="sub">no historic cover</span></div>
+      <div class="stat-card"><span class="k">RAG corpus</span><b id="dashRag">—</b><span class="sub" id="dashRagSub">—</span></div>
+      <div class="stat-card"><span class="k">Mirror rows</span><b id="dashMirror">—</b><span class="sub" id="dashMirrorSub">—</span></div>
+      <div class="stat-card"><span class="k">Uptime / Snow calls</span><b id="dashUp">—</b><span class="sub" id="dashSnowSub">—</span></div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Needs triage</h2>
+    <div id="dashUntriaged" class="dash-list"><span class="muted">—</span></div>
+  </section>
+  <section class="card">
+    <h2>Recently triaged</h2>
+    <div id="dashRecent" class="dash-list"><span class="muted">—</span></div>
+  </section>
+  </div>
+
+  <!-- Connection panel: own section, first sidenav entry -->
+  <div id="view-connect" class="view hidden">
+  <section class="card">
+    <h2>Connect</h2>
+    <p class="muted"><b>Bearer</b> mints an OAuth token; <b>Basic</b> sends username/password per request.</p>
     <div class="grid2">
       <label>Instance URL
         <input id="inInstance" value="https://dev389543.service-now.com" spellcheck="false" />
       </label>
-      <label>Client ID
-        <input id="inClientId" placeholder="Paste from .env → SNOW_CLIENT_ID" spellcheck="false" />
+      <label>Auth mode
+        <select id="selAuthMode">
+          <option value="bearer" selected>Bearer (OAuth)</option>
+          <option value="basic">Basic</option>
+        </select>
       </label>
     </div>
-    <label>Client Secret
-      <input id="inClientSecret" type="password" placeholder="Paste from .env → SNOW_CLIENT_SECRET" spellcheck="false" />
-    </label>
+    <div id="bearerRows">
+      <div class="grid2">
+        <label>Client ID
+          <input id="inClientId" placeholder="Client ID" spellcheck="false" />
+        </label>
+        <label>Grant type
+          <select id="selGrantType">
+            <option value="password" selected>password</option>
+            <option value="client_credentials">client_credentials</option>
+          </select>
+        </label>
+      </div>
+      <label>Client Secret
+        <input id="inClientSecret" type="password" placeholder="Client secret" spellcheck="false" />
+      </label>
+    </div>
+    <div class="grid2">
+      <label>Username
+        <input id="inUser" placeholder="Username" spellcheck="false" />
+      </label>
+      <label>Password
+        <input id="inPass" type="password" placeholder="Password" spellcheck="false" />
+      </label>
+    </div>
     <div class="row">
-      <button id="btnConnect" class="btn primary">Connect &amp; Get Token</button>
+      <button id="btnConnect" class="btn primary">Connect</button>
       <button id="btnDisconnect" class="btn ghost">Disconnect</button>
       <button id="btnToggleSecret" class="btn ghost">Show secret</button>
       <span id="connMsg" class="msg"></span>
     </div>
   </section>
+  </div>
 
   <!-- Toolbar -->
+  <div id="view-incidents" class="view hidden">
   <section class="card">
-    <h2>2 · Incidents</h2>
+    <h2>Incidents (Query Service Now at realtime)</h2>
     <div class="toolbar">
-      <input id="inSearch" placeholder="Search number / short description…" />
+      <input id="inSearch" placeholder="Search…" />
       <select id="selLimit">
+        <option value="5" selected>5</option>
         <option value="10">10</option>
-        <option value="25" selected>25</option>
+        <option value="25">25</option>
         <option value="50">50</option>
         <option value="100">100</option>
       </select>
-      <label class="check"><input type="checkbox" id="chkActive" checked /> active only</label>
+      <label class="check"><input type="checkbox" id="chkActive" checked /> Active</label>
       <button id="btnRefresh" class="btn primary">Refresh</button>
-      <button id="btnOpenCreate" class="btn success">+ New Incident</button>
+      <button id="btnOpenCreate" class="btn success">+ New</button>
     </div>
     <div id="tableWrap">
       <table>
         <thead>
           <tr>
             <th data-sort="number">Number <span class="sort-arrow"></span></th>
-            <th>sys_id</th>
             <th data-sort="short_description">Short description <span class="sort-arrow"></span></th>
-            <th data-sort="state">State <span class="sort-arrow"></span></th>
+            <th data-sort="state">State <span class="sort-arrow"></span> <button id="btnStateLegend" class="info-btn" title="What do state values mean?">?</button></th>
             <th data-sort="priority">Pri <span class="sort-arrow"></span></th>
             <th data-sort="urgency">Urg <span class="sort-arrow"></span></th>
             <th data-sort="impact">Imp <span class="sort-arrow"></span></th>
@@ -83,7 +167,7 @@
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody id="tbody"><tr><td colspan="10" class="muted">Not connected — connect first, then refresh.</td></tr></tbody>
+        <tbody id="tbody"><tr><td colspan="10" class="muted">Connect, then Refresh.</td></tr></tbody>
       </table>
     </div>
     <div class="pager-row">
@@ -95,17 +179,231 @@
       </div>
     </div>
   </section>
+
+  <!-- Custom table card -->
+  </div>
+  <div id="view-custom" class="view hidden">
+  <section class="card">
+    <h2>Custom Table — <code id="customTitleTable">u_snow_incident_table</code></h2>
+    <p class="muted">Free-text search or raw encoded query (e.g. <code>u_number=INC0001</code>).</p>
+    <div class="toolbar">
+      <input id="inCustomTable" value="u_snow_incident_table" spellcheck="false" style="width:220px" title="Table name" />
+      <input id="inCustomSearch" placeholder="Search…" style="width:240px" />
+      <input id="inCustomQuery" placeholder="Encoded query…" style="width:280px" />
+      <select id="selCustomLimit" style="width:90px">
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+      </select>
+      <button id="btnCustomRefresh" class="btn primary">Query</button>
+    </div>
+    <div id="customTableWrap">
+      <table>
+        <thead><tr id="customHead"><th class="muted">Connect &amp; Query to load.</th></tr></thead>
+        <tbody id="customBody"><tr><td class="muted">No data — enter a table and Query.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager-row">
+      <p id="customCountLine" class="muted"></p>
+      <div class="pager">
+        <button id="btnCustomPrev" class="btn sm">← Prev</button>
+        <span id="customPageInfo" class="muted">Page 1</span>
+        <button id="btnCustomNext" class="btn sm">Next →</button>
+      </div>
+    </div>
+    <p id="customMsg" class="msg"></p>
+  </section>
+  </div>
+
+  <!-- Current incidents view -->
+  <div id="view-current" class="view hidden">
+  <section class="card">
+    <h2>Current <span class="muted small">open tickets + grounded triage</span></h2>
+    <p class="muted">Open / in-progress tickets with triage, RCA and solution from historic resolved tickets only. Unsupported cases say so explicitly.</p>
+    <div class="toolbar">
+      <button id="btnCurrentRefresh" class="btn primary">Refresh</button>
+      <button id="btnCurrentRun" class="btn success">Run pipeline</button>
+      <span id="currentMsg" class="msg"></span>
+    </div>
+    <div id="currentTableWrap">
+      <table>
+        <thead><tr><th>Ticket</th><th>Summary</th><th>Status</th><th>Pri</th><th>Confidence</th><th>Triaged</th><th>Actions</th></tr></thead>
+        <tbody id="currentBody"><tr><td colspan="7" class="muted">No data — click Refresh.</td></tr></tbody>
+      </table>
+    </div>
+    <p id="currentCountLine" class="muted"></p>
+  </section>
+  </div>
+
+  <!-- Sync view -->
+  <div id="view-sync" class="view hidden">
+  <section class="card">
+    <h2>Sync</h2>
+    <p class="muted">Mirror + vector-DB health. The mirror job runs outside the web server.</p>
+    <div class="grid2">
+      <div class="det-sec"><h4>Incident mirror (<code>snow_incident</code>)</h4>
+        <p class="muted small">Rows: <b id="syncRows">—</b> · Watermark: <code id="syncWatermark">—</code> · Latest sync: <span id="syncLatest">—</span></p>
+      </div>
+      <div class="det-sec"><h4>RAG vector DB (<code>rag_ticket</code>)</h4>
+        <p class="muted small">Closed tickets: <b id="ragRows">—</b> · Dims: <span id="ragDims">—</span> · Ollama: <span id="ollamaUp">—</span> · Chat model: <code id="ragModel">—</code></p>
+      </div>
+    </div>
+    <div class="row">
+      <button id="btnSyncStats" class="btn primary">Refresh</button>
+    </div>
+    <details class="raw"><summary>Commands</summary><pre>venv/bin/python sync_to_pg.py --once --since 2026-10-01
+venv/bin/python sync_to_pg.py --once
+venv/bin/python sync_to_pg.py --loop --interval 60
+venv/bin/python rag_ingest.py --once
+venv/bin/python rag_ingest.py --stats</pre></details>
+    <p id="syncMsg" class="msg"></p>
+  </section>
+  </div>
+
+  <!-- Agent chat view (ChatGPT-style) -->
+  <div id="view-rag" class="view hidden">
+  <section class="card gpt-app">
+    <aside class="gpt-side">
+      <button id="btnRagNew" class="gpt-new" title="Start a new chat">＋ New chat</button>
+      <div class="gpt-hist-label">Chats <span id="ragHistCount" class="muted"></span><button id="btnRagClear" class="gpt-clear" title="Delete all chats">Clear</button></div>
+      <div id="ragHistory" class="gpt-hist"></div>
+    </aside>
+    <div class="gpt-main">
+      <div class="gpt-top"><span class="gpt-model">ServiceNow Agent</span><span class="model-pill">llama3.1:8b · local</span></div>
+      <div id="ragThread" class="chat-thread gpt-thread">
+        <div class="gpt-greet">What can I help with?</div>
+      </div>
+      <div id="ragSugs" class="sug-grid">
+        <button class="sug-chip" data-q="J2EE-0003"><b>Analyze J2EE-0003</b><span>Root cause + fix from history</span></button>
+        <button class="sug-chip" data-q="Production GlassFish connection pool exhausted overnight, suspected JDBC leak"><b>Pool exhaustion</b><span>GlassFish JDBC leak pattern</span></button>
+        <button class="sug-chip" data-q="JMS queue backlog with stuck messages, what fixed similar cases?"><b>JMS backlog</b><span>What fixed similar cases</span></button>
+      </div>
+      <div class="gpt-bottom">
+        <div class="composer">
+          <textarea id="inRagInput" rows="1" placeholder="Message ServiceNow Agent…"></textarea>
+          <button id="btnRagAsk" class="send-btn" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </div>
+        <div class="gpt-controls">
+          <label class="check" title="Agentic loop with trace. Off = single-shot answer."><input type="checkbox" id="chkAgent" checked /> Agentic</label>
+          <label class="check" title="Similar tickets retrieved per turn">k
+            <select id="selRagK" class="composer-k">
+              <option value="3">3</option>
+              <option value="5" selected>5</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+          <span class="disclaimer">Local RAG can err — verify against cited tickets.</span>
+        </div>
+        <p id="ragMsg" class="msg"></p>
+      </div>
+    </div>
+  </section>
+  </div>
+
+  <!-- Observability view -->
+  <div id="view-obs" class="view hidden">
+  <section class="card">
+    <h2>Observability <span class="muted small">live · resets on restart</span></h2>
+    <div class="row" style="margin-top:0">
+      <span class="muted small">Uptime <b id="mUptime">—</b></span>
+      <button id="btnMetrics" class="btn primary sm">Refresh</button>
+      <span id="mMsg" class="msg"></span>
+    </div>
+    <div id="statGrid" class="stat-grid" style="margin-top:12px">
+      <div class="stat-card"><span class="k">Requests</span><b id="mReq">—</b><span class="sub" id="mErr">—</span></div>
+      <div class="stat-card"><span class="k">Latency p50 / p95</span><b id="mLat">—</b><span class="sub">all routes</span></div>
+      <div class="stat-card"><span class="k">ServiceNow</span><b id="mSnow">—</b><span class="sub" id="mSnowLat">—</span></div>
+      <div class="stat-card"><span class="k">Tokens</span><b id="mTok">—</b><span class="sub">minted / reused</span></div>
+      <div class="stat-card"><span class="k">RAG asks</span><b id="mRag">—</b><span class="sub" id="mRagLat">—</span></div>
+      <div class="stat-card"><span class="k">Mirror</span><b id="mMirror">—</b><span class="sub" id="mLag">—</span></div>
+      <div class="stat-card"><span class="k">Vectors / Ollama</span><b id="mVec">—</b><span class="sub" id="mOll">—</span></div>
+      <div class="stat-card"><span class="k">Host</span><b id="mHost">—</b><span class="sub">load · mem avail</span></div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Traffic <span class="muted small">last hour</span></h2>
+    <h4 class="muted small">Requests / errors</h4>
+    <canvas id="chReq" class="chart" height="150"></canvas>
+    <h4 class="muted small">Latency (API vs ServiceNow)</h4>
+    <canvas id="chLat" class="chart" height="150"></canvas>
+    <h4 class="muted small">ServiceNow + RAG calls</h4>
+    <canvas id="chSnow" class="chart" height="150"></canvas>
+  </section>
+  <section class="card">
+    <h2>Endpoints <span class="muted small">since restart</span></h2>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Route</th><th>Requests</th><th>Errors</th><th>Avg ms</th><th>Max ms</th></tr></thead>
+      <tbody id="mEndpoints"><tr><td colspan="5" class="muted">No data yet.</td></tr></tbody>
+    </table></div>
+  </section>
+  </div>
+  <!-- Early Warning view -->
+  <div id="view-ew" class="view hidden">
+  <section class="card">
+    <div class="dash-head">
+      <h2>Early Warning</h2>
+      <button id="btnEWRefresh" class="btn primary sm">Refresh</button>
+    </div>
+    <p class="muted">IsolationForest anomaly detection + RandomForest failure prediction over microservices logs.</p>
+    <div class="grid2">
+      <div class="det-sec"><h4>IsolationForest · anomaly</h4><div id="ewIF" class="ew-model">—</div></div>
+      <div class="det-sec"><h4>RandomForest · failure</h4><div id="ewRF" class="ew-model">—</div></div>
+    </div>
+    <details class="raw"><summary>Per-service alert thresholds</summary><div id="ewCal" class="ew-model">—</div></details>
+    <p id="ewModelMsg" class="msg"></p>
+  </section>
+  <section class="card">
+    <h2>Score an entry</h2>
+    <p class="muted">Load a sample (or enter metrics manually below), then Score — the ML verdict is normal vs failure.</p>
+    <div class="toolbar">
+      <select id="selEWService" style="width:140px">
+        <option>gateway</option><option>auth</option><option>orders</option>
+        <option selected>payments</option><option>inventory</option><option>notify</option>
+      </select>
+      <button id="btnEWSampleNormal" class="btn ghost sm">Normal sample</button>
+      <button id="btnEWSamplePeak" class="btn ghost sm">Peak sample</button>
+      <button id="btnEWSampleFailure" class="btn ghost sm">Failure sample</button>
+      <button id="btnEWScore" class="btn primary">Score</button>
+      <span id="ewMsg" class="msg"></span>
+    </div>
+    <details class="raw"><summary>Manual entry (7 metrics)</summary>
+    <div class="grid3">
+      <label>Requests/min<input id="ewF_count" type="number" step="any" /></label>
+      <label>Error rate (0–1)<input id="ewF_err_rate" type="number" step="any" /></label>
+      <label>p95 latency ms<input id="ewF_p95" type="number" step="any" /></label>
+      <label>Mean latency ms<input id="ewF_avg_lat" type="number" step="any" /></label>
+      <label>CPU %<input id="ewF_cpu" type="number" step="any" /></label>
+      <label>Memory %<input id="ewF_mem" type="number" step="any" /></label>
+      <label>Pool used %<input id="ewF_pool" type="number" step="any" /></label>
+    </div>
+    </details>
+    <p id="ewHistNote" class="muted small"></p>
+    <div id="ewResult" class="hidden">
+      <div class="verdict-row"><span id="ewVerdict" class="pill verdict">—</span></div>
+      <div class="det-sec"><h4>Model output</h4><div id="ewOut" class="ew-model">—</div></div>
+      <div class="proba-wrap"><div class="proba-bar"><div id="ewProbaFill" class="proba-fill"></div></div>
+      <span id="ewProbaText" class="muted small">—</span></div>
+      <div class="det-sec"><h4>Top deviating features</h4><div id="ewTop" class="ew-model">—</div></div>
+    </div>
+  </section>
+  </div>
+
 </main>
+</div>
 
 <!-- Create modal -->
 <div id="createModal" class="modal hidden">
   <div class="modal-box">
-    <h3>Create Incident <span class="muted small">(POST /api/now/table/incident)</span></h3>
+    <h3>Create Incident</h3>
+    <button class="modal-x" data-close title="Close">×</button>
     <label>Short description *
-      <input id="cShort" placeholder="Test incident created through Python" />
+      <input id="cShort" placeholder="Short description" />
     </label>
     <label>Description
-      <textarea id="cDesc" rows="3" placeholder="This incident was created using the ServiceNow Table API."></textarea>
+      <textarea id="cDesc" rows="3" placeholder="Description"></textarea>
     </label>
     <div class="grid3">
       <label>Urgency
@@ -119,7 +417,7 @@
       </label>
     </div>
     <label>Comments / work notes
-      <input id="cComments" placeholder="optional" />
+      <input id="cComments" placeholder="Optional" />
     </label>
     <div class="row end">
       <button class="btn ghost" data-close>Cancel</button>
@@ -133,12 +431,13 @@
 <div id="updateModal" class="modal hidden">
   <div class="modal-box">
       <h3>Update Incident <span id="uNumber" class="muted small"></span></h3>
-      <p id="uCurrent" class="muted small">Loading current values…</p>
+      <button class="modal-x" data-close title="Close">×</button>
+      <p id="uCurrent" class="muted small">Loading…</p>
     <input id="uSysId" type="hidden" />
     <div class="grid3">
       <label>Priority
           <select id="uPriority"><option value="">— no change —</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
-          <span class="hint">Auto-calculated by ServiceNow from Urgency × Impact — set those to control it.</span>
+          <span class="hint">ServiceNow auto-calculates Priority from Urgency × Impact.</span>
       </label>
       <label>State
         <select id="uState"><option value="">— no change —</option><option value="1">1 New</option><option value="2">2 In Progress</option><option value="3">3 On Hold</option><option value="6">6 Resolved</option><option value="7">7 Closed</option></select>
@@ -147,23 +446,41 @@
         <select id="uUrgency"><option value="">—</option><option>1</option><option>2</option><option>3</option></select>
       </label>
     </div>
-    <label>Assignment group (sys_id)
-      <input id="uAssignGroup" placeholder="e.g. 287ebd7da9fe198100f92cc8d1d2154e" spellcheck="false" />
+    <label>Assignment group
+      <input id="uAssignGroup" placeholder="Assignment group sys_id" spellcheck="false" />
     </label>
-    <label>Description (replaces)
+    <label>Description
       <textarea id="uDesc" rows="2"></textarea>
     </label>
-    <label>Comments (appends)
+    <label>Comments
       <textarea id="uComments" rows="2"></textarea>
     </label>
-    <label>Work notes (appends)
+    <label>Work notes
       <textarea id="uWorkNotes" rows="2"></textarea>
     </label>
     <div class="row end">
       <button class="btn ghost" data-close>Cancel</button>
-      <button id="btnUpdate" class="btn primary">Save (PATCH)</button>
+      <button id="btnUpdate" class="btn primary">Save</button>
     </div>
     <p id="updateMsg" class="msg"></p>
+  </div>
+</div>
+
+<!-- State values legend modal -->
+<div id="stateLegendModal" class="modal hidden">
+  <div class="modal-box narrow">
+    <h3>Incident state values</h3>
+    <button class="modal-x" data-close title="Close">×</button>
+    <div class="legend-grid">
+      <span class="pill st-1">1</span><span><b>New</b> — just raised, not yet worked</span>
+      <span class="pill st-2">2</span><span><b>In Progress</b> — actively being worked</span>
+      <span class="pill st-3">3</span><span><b>On Hold</b> — waiting on someone/something</span>
+      <span class="pill st-6">6</span><span><b>Resolved</b> — fix applied, awaiting closure</span>
+      <span class="pill st-7">7</span><span><b>Closed</b> — confirmed and closed</span>
+    </div>
+    <div class="row end">
+      <button class="btn ghost" data-close>Close</button>
+    </div>
   </div>
 </div>
 
@@ -171,10 +488,36 @@
 <div id="detailModal" class="modal hidden">
   <div class="modal-box wide">
     <h3 id="dTitle">Incident detail</h3>
+    <button class="modal-x" data-close title="Close">×</button>
     <div id="dBody" class="detail"></div>
     <div class="row end">
       <button id="btnDetailDelete" class="btn danger">Delete</button>
       <button id="btnDetailEdit" class="btn primary">Edit</button>
+      <button class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Current-ticket detail modal -->
+<div id="currentDetailModal" class="modal hidden">
+  <div class="modal-box wide">
+    <h3 id="curTitle">Current ticket</h3>
+    <button class="modal-x" data-close title="Close">×</button>
+    <div id="curBody" class="detail"></div>
+    <div class="row end">
+      <button id="btnCurRetriage" class="btn primary">Re-analyse</button>
+      <button class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Generic custom-record detail modal -->
+<div id="customDetailModal" class="modal hidden">
+  <div class="modal-box wide">
+    <h3 id="cdTitle">Record detail</h3>
+    <button class="modal-x" data-close title="Close">×</button>
+    <div id="cdBody" class="detail"></div>
+    <div class="row end">
       <button class="btn ghost" data-close>Close</button>
     </div>
   </div>
