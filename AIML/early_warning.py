@@ -24,19 +24,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(HERE, "config.json"), encoding="utf-8") as f:
     CONFIG = json.load(f)
 
-FEATURES = ["count", "err_rate", "p95", "avg_lat", "cpu", "mem", "pool"]
+FEATURES = ["err_rate", "p95", "avg_lat", "error_line_rate", "warn_rate",
+            "exception_rate", "timeout_rate"]
 
-# MAD floors: (<relative-to-median>, <absolute>) per feature. A zero-MAD
-# feature (e.g. usually-zero error rate) would otherwise turn a single blip
-# into an astronomical z-score. Effective MAD = max(mad, rel*|median|, abs).
+# Logs-only features: every one is derivable from log lines alone (status,
+# latency, level, message text) — no request counts, no metrics API. Rates
+# (not volumes) survive sampled/partial log streams.
+EXC_RE = None  # compiled lazily (module import must stay cheap)
+TIMEOUT_RE = None
+
+
+def _regexes():
+    import re
+
+    global EXC_RE, TIMEOUT_RE
+    if EXC_RE is None:
+        EXC_RE = re.compile(
+            r"exception|traceback|oom|outofmemory|pool exhausted|"
+            r"connection refused|circuitbreaker|fatal", re.IGNORECASE)
+        TIMEOUT_RE = re.compile(r"timeout|timed out|deadline exceeded", re.IGNORECASE)
+    return EXC_RE, TIMEOUT_RE
+
+
+# MAD floors: (<relative-to-median>, <absolute>) per feature.
 MAD_FLOORS = {
-    "count": (0.05, 1.0),
-    "err_rate": (0.0, 0.01),
+    "err_rate": (0.0, 0.02),
     "p95": (0.15, 5.0),
     "avg_lat": (0.10, 2.0),
-    "cpu": (0.0, 2.0),
-    "mem": (0.0, 2.0),
-    "pool": (0.0, 3.0),
+    "error_line_rate": (0.0, 0.02),
+    "warn_rate": (0.0, 0.03),
+    "exception_rate": (0.0, 0.01),
+    "timeout_rate": (0.0, 0.01),
 }
 
 
@@ -51,7 +69,13 @@ def parse_line(line: str):
 
 
 def minute_features(records: list[dict]) -> dict:
-    """Aggregate one minute of log records -> {service: {feature: value}}."""
+    """Aggregate one minute of log records -> {service: {feature: value}}.
+
+    Logs-only: every feature derives from status, latency, level, or message
+    text. No volumes, no metrics API. Keyword rates fall back to level/status
+    proxies when a record carries no message (backward compatible).
+    """
+    exc_re, timeout_re = _regexes()
     per_svc: dict[str, list[dict]] = {}
     for r in records:
         if r.get("event") in ("oom_crash", "restart"):
@@ -63,19 +87,32 @@ def minute_features(records: list[dict]) -> dict:
         n = len(rows)
         errs = sum(1 for x in rows if (x.get("status") or 0) >= 500)
         p95 = lats[min(n - 1, int(n * 0.95))]
-
-        def _avg(key: str) -> float:
-            vals = [x[key] for x in rows if x.get(key) is not None]
-            return sum(vals) / len(vals) if vals else 0.0
-
+        err_lines = warn_lines = exc_lines = timeout_lines = 0
+        for x in rows:
+            lvl = (x.get("level") or "").upper()
+            if lvl in ("ERROR", "CRITICAL", "FATAL"):
+                err_lines += 1
+            elif lvl in ("WARN", "WARNING"):
+                warn_lines += 1
+            msg = str(x.get("message", "") or x.get("msg", "") or "")
+            if msg:
+                if exc_re.search(msg):
+                    exc_lines += 1
+                if timeout_re.search(msg):
+                    timeout_lines += 1
+            else:  # no message: status proxies keep old files working
+                if (x.get("status") or 0) >= 500:
+                    exc_lines += 0  # errors already counted; don't double-count
+                if (x.get("status") or 0) == 504:
+                    timeout_lines += 1
         out[svc] = {
-            "count": float(n),
             "err_rate": errs / n if n else 0.0,
             "p95": float(p95),
             "avg_lat": sum(lats) / n if n else 0.0,
-            "cpu": _avg("cpu_pct"),
-            "mem": _avg("mem_pct"),
-            "pool": _avg("pool_used"),
+            "error_line_rate": err_lines / n if n else 0.0,
+            "warn_rate": warn_lines / n if n else 0.0,
+            "exception_rate": exc_lines / n if n else 0.0,
+            "timeout_rate": timeout_lines / n if n else 0.0,
         }
     return out
 
@@ -111,12 +148,6 @@ class Baseline:
             for feat in FEATURES:
                 med, mad = ref[feat]
                 rel, floor_abs = MAD_FLOORS[feat]
-                if feat == "err_rate":
-                    # Small-sample guard: a couple of errors in a low-traffic
-                    # service must not look catastrophic. Floor scales with
-                    # 1.5 errors per typical minute for that service.
-                    cnt_med = ref["count"][0]
-                    floor_abs = max(floor_abs, 1.5 / max(cnt_med, 1.0))
                 mad_eff = max(mad, rel * abs(med), floor_abs)
                 zs[feat] = 0.6745 * (fmap[feat] - med) / mad_eff
             out[svc] = (zs, max(abs(v) for v in zs.values()))

@@ -852,7 +852,7 @@ if ($("btnDashRefresh")) {
 
 // ---- Early Warning (AIML model details + single-entry scoring) ----
 let ewHistory = [];
-const EW_FEATS = ["count", "err_rate", "p95", "avg_lat", "cpu", "mem", "pool"];
+const EW_FEATS = ["err_rate", "p95", "avg_lat", "error_line_rate", "warn_rate", "exception_rate", "timeout_rate"];
 
 async function loadEWModel() {
   const m = $("ewModelMsg");
@@ -874,7 +874,7 @@ async function loadEWModel() {
       + Object.entries(cal).map(([s, t]) =>
         `<tr><td>${esc(s)}</td><td>${t.watch?.toFixed(3)}</td><td>${t.warning?.toFixed(3)}</td><td>${t.critical?.toFixed(3)}</td>`).join("")
       + `</tbody></table>`;
-    if (!$("ewF_count")?.value) ewSample("normal"); // one-click Score on first visit
+    if (!$("ewF_err_rate")?.value) ewSample("normal"); // one-click Score on first visit
     if (m) { m.textContent = ""; m.className = "msg"; }
   } catch (e) {
     if (m) { m.textContent = e.message; m.className = "msg err"; }

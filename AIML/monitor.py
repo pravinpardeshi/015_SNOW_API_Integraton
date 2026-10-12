@@ -117,7 +117,14 @@ def cmd_replay(args) -> int:
     from train import load_minutes
 
     backend = make_backend(args.ml)
-    buckets = load_minutes(os.path.join(HERE, CONFIG["log_file"]))
+    if args.format == "cloudwatch":
+        from cloudwatch_source import load_cw_file
+
+        buckets = load_cw_file(args.log)
+        print(f"Replaying CloudWatch file {args.log} "
+              f"({sum(len(v) for v in buckets.values())} events).")
+    else:
+        buckets = load_minutes(args.log or os.path.join(HERE, CONFIG["log_file"]))
     with open_alerts() as alerts:
         for m in sorted(buckets):
             handle_minute(m, buckets[m], backend, alerts)
@@ -201,6 +208,9 @@ def main(argv=None) -> int:
     ap.add_argument("--source", default="file", choices=["file", "cloudwatch"],
                     help="log source (default: file)")
     ap.add_argument("--ml", action="store_true", help="use IsolationForest + RandomForest backend")
+    ap.add_argument("--log", default="", help="replay this file instead of the configured log")
+    ap.add_argument("--format", default="internal", choices=["internal", "cloudwatch"],
+                    help="format of --log (default: internal)")
     ap.add_argument("--speed", type=float, default=0.0, help="sec pause per minute in replay")
     args = ap.parse_args(argv)
     if args.source == "cloudwatch":

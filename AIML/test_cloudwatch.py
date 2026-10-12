@@ -70,9 +70,9 @@ def test_pagination_and_features() -> None:
 
     feats = minute_features(recs)
     o = feats["orders"]
-    check("count", o["count"] == 3.0, str(o))
     check("err_rate", abs(o["err_rate"] - 1 / 3) < 1e-9, str(o))
-    check("metrics skipped w/o client values", o["cpu"] == 0.0, str(o))
+    check("logs-only keys", set(o) == {"err_rate", "p95", "avg_lat", "error_line_rate",
+                                       "warn_rate", "exception_rate", "timeout_rate"}, str(o))
 
 
 def test_metric_overlay() -> None:
@@ -116,8 +116,9 @@ def test_end_to_end_shape() -> None:
                            logs_client=logs, metrics_client=mw)
     feats = src.fetch_minute_features(datetime(2026, 10, 11, 9, 0, tzinfo=timezone.utc))
     p = feats.get("payments", {})
-    check("e2e shape", set(p) == {"count", "err_rate", "p95", "avg_lat", "cpu", "mem", "pool"}
-          and p["count"] == 2.0, str(p))
+    check("e2e shape", set(p) == {"err_rate", "p95", "avg_lat", "error_line_rate",
+                                  "warn_rate", "exception_rate", "timeout_rate"}
+          and p["err_rate"] == 0.0, str(p))
 
 
 def main() -> int:

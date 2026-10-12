@@ -76,8 +76,8 @@ def main(argv=None) -> int:
     model.save(out)
     print(f"Trained on {len(per_minute)} buckets -> {out}")
     for svc in sorted(model.stats):
-        meds = {f: round(model.stats[svc][f][0], 2) for f in
-                ("count", "err_rate", "p95", "cpu", "pool")}
+        meds = {f: round(model.stats[svc][f][0], 3) for f in
+                ("err_rate", "p95", "warn_rate", "exception_rate", "timeout_rate")}
         print(f"  {svc:10s} medians: {meds}")
     return 0
 

@@ -55,13 +55,14 @@ code{background:var(--surface);padding:2px 7px;border-radius:7px;border:1px soli
 }
 .logo.sm{width:36px;height:36px;font-size:1.05rem;border-radius:10px}
 .sidenav nav{display:grid;gap:6px}
+.side-label{font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);padding:10px 12px 0}
 .nav-item{
   display:flex;align-items:center;gap:11px;text-align:left;cursor:pointer;
   border:1px solid transparent;background:transparent;color:var(--muted);
   padding:10px 12px;border-radius:12px;font-weight:600;font-size:0.875rem;font-family:inherit;
   transition:all .16s ease;
 }
-.nav-item svg{width:22px;height:22px;flex:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
+.nav-item svg{width:28px;height:28px;flex:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
 .nav-item[data-view="view-dashboard"] svg{color:#38bdf8}
 .nav-item[data-view="view-connect"] svg{color:#34d399}
 .nav-item[data-view="view-incidents"] svg{color:#fbbf24}
@@ -78,10 +79,10 @@ code{background:var(--surface);padding:2px 7px;border-radius:7px;border:1px soli
 
 /* ---- collapsed sidenav (toggle) ---- */
 .shell.nav-collapsed .sidenav{width:70px;padding:14px 8px}
-.shell.nav-collapsed .side-brand span:last-child,.shell.nav-collapsed .side-foot{display:none}
+.shell.nav-collapsed .side-brand span:last-child,.shell.nav-collapsed .side-foot,.shell.nav-collapsed .side-label{display:none}
 .shell.nav-collapsed .side-brand{justify-content:center;padding:0}
 .shell.nav-collapsed .nav-item{font-size:0;gap:0;justify-content:center;padding:11px 6px}
-.shell.nav-collapsed .nav-item svg{width:22px;height:22px}
+.shell.nav-collapsed .nav-item svg{width:28px;height:28px}
 
 /* ---- topbar ---- */
 .topbar{
@@ -414,15 +415,16 @@ pre{background:var(--bg-deep);border:1px solid var(--line);border-radius:11px;pa
 [data-theme="light"] .pill.st-3{background:#ffedd5;color:#9a3412;border-color:#fdba74}
 [data-theme="light"] .pill.st-6{background:#ccfbf1;color:#115e59;border-color:#5eead4}
 [data-theme="light"] .pill.st-7,[data-theme="light"] .pill.st-8{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+[data-theme="light"] .nav-item svg{filter:drop-shadow(0 2px 5px rgba(15,35,70,.25))}
 [data-theme="light"] tbody tr:hover{background:rgba(2,132,199,.06)}
 
 /* ---- responsive ---- */
 @media(max-width:900px){
   .sidenav{width:70px;padding:14px 8px}
-  .side-brand span:last-child,.side-foot{display:none}
+  .side-brand span:last-child,.side-foot,.side-label{display:none}
   .side-brand{justify-content:center;padding:0}
   .nav-item{font-size:0;gap:0;justify-content:center;padding:11px 6px}
-  .nav-item svg{width:22px;height:22px}
+  .nav-item svg{width:28px;height:28px}
   .layout{padding:0 12px 36px}
 }
 @media(max-width:800px){

@@ -3018,7 +3018,7 @@ def api_ew_sample(
         raise HTTPException(status_code=400, detail=f"Unknown service {service!r}.")
     if kind not in ("normal", "peak", "failure"):
         raise HTTPException(status_code=400, detail="kind must be normal|peak|failure.")
-    feats = ["count", "err_rate", "p95", "avg_lat", "cpu", "mem", "pool"]
+    feats = ["err_rate", "p95", "avg_lat", "error_line_rate", "warn_rate", "exception_rate", "timeout_rate"]
     if kind == "normal":
         bl_path = os.path.join(EW_DIR, "models", "baseline.json")
         if not os.path.exists(bl_path):
@@ -3059,7 +3059,7 @@ def api_ew_score(body: EWScoreRequest):
 
     if body.service not in ew.CONFIG["services"]:
         raise HTTPException(status_code=400, detail=f"Unknown service {body.service!r}.")
-    feats = ["count", "err_rate", "p95", "avg_lat", "cpu", "mem", "pool"]
+    feats = ["err_rate", "p95", "avg_lat", "error_line_rate", "warn_rate", "exception_rate", "timeout_rate"]
     try:
         cur = {f: float(body.features[f]) for f in feats}
     except (KeyError, TypeError, ValueError):

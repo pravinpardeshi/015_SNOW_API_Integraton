@@ -20,8 +20,12 @@ mem_pct pool_used`.
 
 ## How detection works (`early_warning.py`)
 
-- **Features/minute/service:** request count, error rate, p95 + mean latency, cpu, memory, pool usage.
-- **Learned baseline:** per-(service, feature) median + MAD from the train window → robust z-score per minute, with MAD floors (relative + absolute, error floor scaled by each service's traffic) so low-traffic noise can't explode into false alarms.
+- **Features/minute/service — logs-only:** error rate, p95 + mean latency,
+  ERROR-line rate, WARN rate, exception-keyword rate
+  (`Exception|Traceback|OOM|pool exhausted|…`), timeout rate
+  (`Timeout|deadline exceeded` + 504s). No request counts (unreliable under
+  sampled logs), no metrics API — every feature derives from log lines.
+- **Learned baseline:** per-(service, feature) median + MAD from the train window → robust z-score per minute, with MAD floors so usually-zero rates can't explode into false alarms.
 - **Levels:** OK < 2.5 WATCH < 4.0 WARNING < 6.0 CRITICAL (`config.json`).
 - **Prediction:** a service at WARNING+ for 3 straight rising minutes ⇒ *"failure likely within ~5 min"* (once per episode). Trend rule over learned scores — no failure labels used at runtime.
 
@@ -56,10 +60,31 @@ torch/TF is installed — tree ensembles dominate tabular data this small).
 
 ```bash
 python3 ml_train.py                 # train IF + RF -> models/if_*.joblib, rf_failure.joblib
+python3 ml_train.py --cw-logs logs/cw_seed1.jsonl logs/cw_seed2.jsonl  # train from CW files
 python3 monitor.py --replay --ml    # score with ML backend -> alerts.log
+python3 monitor.py --replay --ml --log logs/cw_seed42.jsonl --format cloudwatch
 python3 monitor.py --live --ml      # tail with ML backend
 python3 evaluate.py                 # same checks, works for both backends
 ```
+
+## CloudWatch-format log files (synthetic)
+
+`generate_logs.py --format cloudwatch` emits FilterLogEvents-shaped JSON
+lines (`timestamp` ms, `message`, `logStreamName`, `ingestionTime`): JSON app
+logs with trace ids (CLF + `%D` timing for ~25% of gateway lines), same
+1-hour normal → peak → failure → restart → recovery scenario:
+
+```bash
+python3 generate_logs.py --format cloudwatch --seed 1 --out logs/cw_seed1.jsonl
+```
+
+`load_cw_file` parses them through the exact runtime path
+(`parse_log_message`, incl. resource fields), with minutes relative to each
+file's first event — so `ml_train.py --cw-logs` and
+`monitor.py --replay --log … --format cloudwatch` train and predict on
+CloudWatch-shaped data. Verified: CW-trained models on unseen `cw_seed42`
+alert at min 35, predict at min 35 (10-min lead), zero false alarms; the
+Early Warn UI scores from the same retrained models.
 
 ## CloudWatch source (AWS)
 
@@ -85,12 +110,12 @@ python3 monitor.py --source cloudwatch [--ml]      # poll forever (Ctrl+C stops)
 python3 test_cloudwatch.py                         # 11 offline tests (Stubber, no AWS)
 ```
 
-## Verified results (seed-42 log)
+## Verified results (seed-42 log, logs-only features)
 
 | Backend | First alert | Prediction (lead) | False alarms 05–29 | `evaluate.py` |
 |---------|-------------|-------------------|--------------------|---------------|
 | stdlib (robust-z + streak) | min 36 | min 38, 7 min | 0 | exit 0 |
-| ML (IF + RF) | min 35 | min 35, **10 min** | 0 | exit 0 |
+| ML (IF + RF) | min 38 | min 35, **10 min** | 0 | exit 0 |
 
 ## Verified results (this log + thresholds)
 

@@ -37,7 +37,8 @@ CLF_RE = re.compile(r'"[A-Z]+ \S+ [^"]*" (\d{3}) (\d+|-) (\d+)')
 
 def parse_log_message(message: str, default_service: str) -> dict:
     """One CloudWatch event message -> flat record fields."""
-    rec = {"service": default_service, "status": None, "latency_ms": 0.0}
+    rec = {"service": default_service, "status": None, "latency_ms": 0.0,
+           "level": None, "cpu_pct": None, "mem_pct": None, "pool_used": None}
     if not message:
         return rec
     try:
@@ -58,8 +59,17 @@ def parse_log_message(message: str, default_service: str) -> dict:
                         break
                     except (TypeError, ValueError):
                         pass
+            for k in ("cpu_pct", "mem_pct", "pool_used"):
+                if d.get(k) is not None:
+                    try:
+                        rec[k] = float(d[k])
+                    except (TypeError, ValueError):
+                        pass
             if d.get("service"):
                 rec["service"] = str(d["service"])
+            lvl = str(d.get("level", "") or "").upper()
+            if lvl in ("DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL", "FATAL"):
+                rec["level"] = "WARN" if lvl == "WARNING" else lvl
             return rec
     except ValueError:
         pass
@@ -72,19 +82,66 @@ def parse_log_message(message: str, default_service: str) -> dict:
 
 def _to_record(event: dict, service: str, minute: int) -> dict:
     ts = datetime.fromtimestamp(event["timestamp"] / 1000.0, tz=timezone.utc)
-    parsed = parse_log_message(event.get("message", ""), service)
+    message = event.get("message", "")
+    parsed = parse_log_message(message, service)
+    level = parsed["level"] or ("ERROR" if (parsed["status"] or 0) >= 500 else "INFO")
     return {
         "ts": ts.strftime("%Y-%m-%dT%H:%M:%S.000"),
         "min": minute,
         "service": parsed["service"],
-        "level": ("ERROR" if (parsed["status"] or 0) >= 500 else "INFO"),
+        "level": level,
         "endpoint": "-",
         "status": parsed["status"],
         "latency_ms": parsed["latency_ms"],
-        "cpu_pct": None,
-        "mem_pct": None,
-        "pool_used": None,
+        "message": message[:2000],
+        "cpu_pct": parsed["cpu_pct"],
+        "mem_pct": parsed["mem_pct"],
+        "pool_used": parsed["pool_used"],
     }
+
+
+def load_cw_file(path: str) -> dict[int, list[dict]]:
+    """CloudWatch-format file -> {relative_minute: [records]}.
+
+    Accepts JSON-lines of FilterLogEvents-shaped events
+    ({timestamp, message, logStreamName, ...}) or a whole-file
+    {"events": [...]} export. Minutes are relative to the earliest event,
+    so synthetic scenario windows (failure at rel-min 45) line up with
+    config.json. Service defaults to the logStreamName prefix.
+    """
+    events = []
+    with open(path, encoding="utf-8") as f:
+        text = f.read().strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict) and isinstance(obj.get("events"), list):
+                events = obj["events"]
+        except ValueError:
+            pass
+    if not events:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and "timestamp" in ev:
+                events.append(ev)
+    if not events:
+        return {}
+    t0 = min(ev["timestamp"] for ev in events)
+    buckets: dict[int, list[dict]] = {}
+    for ev in events:
+        rel = int((ev["timestamp"] - t0) // 60000)
+        stream = str(ev.get("logStreamName", ""))
+        default_svc = stream.split("/")[0] if "/" in stream else (stream or "?")
+        buckets.setdefault(rel, []).append(_to_record(ev, default_svc, rel))
+    return buckets
 
 
 class CloudWatchSource:
@@ -190,7 +247,12 @@ class CloudWatchSource:
 
     # -- combined -------------------------------------------------------
     def fetch_minute_features(self, minute_start) -> dict:
-        """Full feature dict for the minute starting at minute_start (aware dt)."""
+        """Full feature dict for the minute starting at minute_start (aware dt).
+
+        Logs-only: features come purely from log events. Use
+        fetch_metric_minute separately if you also want resource metrics
+        (they are NOT mixed into the detection features).
+        """
         from datetime import timedelta
 
         import early_warning as ew
@@ -198,9 +260,4 @@ class CloudWatchSource:
         end = minute_start + timedelta(seconds=60)
         minute = int(minute_start.timestamp() // 60)
         records = self.fetch_records(minute_start, end, minute)
-        feats = ew.minute_features(records)
-        overlay = self.fetch_metric_minute(minute_start, end)
-        for (svc, kind), val in overlay.items():
-            if svc in feats:
-                feats[svc][{"cpu": "cpu", "mem": "mem", "pool": "pool"}[kind]] = val
-        return feats
+        return ew.minute_features(records)

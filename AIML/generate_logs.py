@@ -13,15 +13,22 @@ Output: logs/microservices_1h.log (JSON lines, ~8 req/s baseline).
 Each line: ts, min, service, level, endpoint, status, latency_ms,
 cpu_pct, mem_pct, pool_used (+ event/msg for restart markers).
 
+--format cloudwatch instead emits CloudWatch FilterLogEvents-shaped JSON
+lines: {"timestamp": ms_epoch, "message": "<app log>", "logStreamName":
+"svc/i-0abc123", "ingestionTime": ms_epoch}. Messages are realistic app
+logs (JSON for most services, CLF for ~25% of gateway lines) carrying the
+same status/latency/resource fields, plus 12-char trace ids.
+
 Usage:
   python3 generate_logs.py [--out logs/microservices_1h.log] [--seed 42]
+  python3 generate_logs.py --format cloudwatch --seed 1 --out logs/cw_seed1.jsonl
 """
 
 import argparse
 import json
 import os
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -156,6 +163,7 @@ def generate(seed: int = 42):
                     "min": m, "service": svc, "level": level, "endpoint": endpoint,
                     "status": status, "latency_ms": lat,
                     "cpu_pct": cpu, "mem_pct": mem, "pool_used": pool,
+                    "message": app_message(svc, status, level, lat, endpoint, rng),
                 })
                 counts[(reg, svc)] = counts.get((reg, svc), 0) + 1
         if m == 49:
@@ -178,14 +186,98 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Generate 1-hour microservices log.")
     ap.add_argument("--out", default=os.path.join(HERE, "logs", "microservices_1h.log"))
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--format", default="internal", choices=["internal", "cloudwatch"])
     args = ap.parse_args(argv)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     lines = generate(seed=args.seed)
+    if args.format == "cloudwatch":
+        lines = [to_cw_event(r, args.seed) for r in lines]
     with open(args.out, "w", encoding="utf-8") as f:
         for r in lines:
             f.write(json.dumps(r) + "\n")
-    print(f"Wrote {len(lines)} lines -> {args.out}")
+    print(f"Wrote {len(lines)} lines [{args.format}] -> {args.out}")
     return 0
+
+
+def app_message(svc: str, status: int, level: str, lat: int,
+                endpoint: str, rng: random.Random) -> str:
+    """Realistic app-log text. Failure/peak symptoms carry exception + timeout
+    keywords so logs-only detectors can see them (status/latency-grounded)."""
+    if status == 504 or (status >= 500 and rng.random() < 0.3):
+        return rng.choice([
+            "Timeout waiting for upstream (deadline exceeded)",
+            f"Upstream call timed out after {lat}ms",
+        ])
+    if status >= 500:
+        if svc == "payments":
+            return rng.choice([
+                "FATAL: connection pool exhausted - Timeout waiting for connection from pool",
+                "Traceback (most recent call last): PoolExhausted: could not checkout connection",
+                "Charge failed: upstream acquirer Timeout",
+            ])
+        if svc == "orders":
+            return "Upstream payments Timeout after 5000ms - order not placed"
+        return f"Request {endpoint} failed with status {status}"
+    if level == "WARN":
+        return f"Slow upstream response {lat}ms on {endpoint}"
+    if level == "CRITICAL":
+        return "Traceback: OutOfMemory heap exhausted holding pool waiters"
+    return "OK"
+
+
+def to_cw_event(rec: dict, seed: int) -> dict:
+    """Internal record -> CloudWatch FilterLogEvents-shaped event."""
+    import hashlib
+
+    stable = int(hashlib.md5(
+        f"{seed}|{rec.get('ts', '')}|{rec.get('service', '')}".encode()
+    ).hexdigest()[:8], 16)
+    rng = random.Random(stable)
+    dt = datetime.strptime(rec["ts"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    ts_ms = int(dt.timestamp() * 1000) + int(rec["ts"][20:23])
+    svc = rec.get("service", "?")
+    trace = "".join(rng.choice("0123456789abcdef") for _ in range(12))
+    if rec.get("event") in ("oom_crash", "restart"):
+        msg = json.dumps({"timestamp": rec["ts"], "service": svc,
+                          "level": rec.get("level", "INFO"), "event": rec["event"],
+                          "msg": rec.get("msg", "")})
+    elif svc == "gateway" and rng.random() < 0.25:
+        # Combined Log Format + %D response-time microseconds (exercises regex path)
+        us = max(1, int(rec.get("latency_ms", 1) * 1000))
+        msg = (f'10.0.{rng.randint(0, 9)}.{rng.randint(2, 250)} - - '
+               f'[{_clf_time(rec["ts"])}] "{_method(rec)} {_path(rec)} HTTP/1.1" '
+               f'{rec.get("status", 200)} {rng.randint(200, 4000)} {us}')
+    else:
+        msg = json.dumps({
+            "timestamp": rec["ts"], "service": svc, "level": rec.get("level", "INFO"),
+            "trace_id": trace, "method": _method(rec), "path": _path(rec),
+            "status": rec.get("status", 200), "latency_ms": rec.get("latency_ms", 0),
+            "msg": rec.get("message", "OK"),
+            "cpu_pct": rec.get("cpu_pct"), "mem_pct": rec.get("mem_pct"),
+            "pool_used": rec.get("pool_used"),
+        })
+    return {"timestamp": ts_ms, "message": msg,
+            "logStreamName": f"{svc}/i-0{rng.randint(100000, 999999):x}",
+            "ingestionTime": ts_ms + rng.randint(200, 2500)}
+
+
+def _method(rec: dict) -> str:
+    ep = rec.get("endpoint", "")
+    return ep.split(" ")[0] if " " in ep else "GET"
+
+
+def _path(rec: dict) -> str:
+    ep = rec.get("endpoint", "")
+    parts = ep.split(" ", 1)
+    return parts[1] if len(parts) > 1 else "/"
+
+
+def _clf_time(ts: str) -> str:
+    # "2026-10-11T09:00:03.123" -> "11/Oct/2026:09:00:03 +0000"
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    return (f"{ts[8:10]}/{months[int(ts[5:7]) - 1]}/{ts[0:4]}"
+            f"{ts[10:19]} +0000")
 
 
 if __name__ == "__main__":

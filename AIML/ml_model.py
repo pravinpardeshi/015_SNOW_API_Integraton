@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(HERE, "config.json"), encoding="utf-8") as f:
     CONFIG = json.load(f)
 
-BASE_FEATURES = ["count", "err_rate", "p95", "avg_lat", "cpu", "mem", "pool"]
+from early_warning import FEATURES as BASE_FEATURES
 SERVICES = CONFIG["services"]
 ONE_HOT = {svc: [1.0 if s == svc else 0.0 for s in SERVICES] for svc in SERVICES}
 WIN = 3  # rolling window for temporal context
