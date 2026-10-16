@@ -22,6 +22,7 @@ ServiceNow integration with an incident web UI, a **Knowledge Agent** (local RAG
 - [Configuration](#configuration)
 - [Running the App](#running-the-app)
 - [Using the Web UI](#using-the-web-ui)
+- [Change Management](#change-management)
 - [Knowledge Agent](#knowledge-agent)
 - [Current Incidents Pipeline](#current-incidents-pipeline)
 - [Early Warning (AIML)](#early-warning-aiml)
@@ -41,6 +42,7 @@ ServiceNow integration with an incident web UI, a **Knowledge Agent** (local RAG
 - Bearer (OAuth `password` / `client_credentials`) and Basic auth; token reused while valid (memory + `.snow_token.json`, `0600`), refreshed with safety skew; one forced refresh + retry on 401
 - Incidents: search, active filter, sorting, pagination with Stats-API totals, detail view with activity timeline, create/update/delete, `sys_id` validation
 - Custom-table explorer (default `u_snow_incident_table`): dynamic columns, free-text + encoded queries, full CRUD
+- Change Management (`change_request` via `manage_change.py` + generic `/api/custom/{table}`): enable check, create/get/list/update
 - Postgres mirror (`sync_to_pg.py`, incremental on `sys_updated_on`)
 
 **Knowledge Agent (RAG + ReAct)**
@@ -116,6 +118,7 @@ SNOW_INSTANCE=https://devXXXXXX.service-now.com
 SNOW_CLIENT_ID=... / SNOW_CLIENT_SECRET=...
 # SNOW_AUTH=bearer|basic   SNOW_GRANT_TYPE=password|client_credentials
 # SNOW_USERNAME / SNOW_PASSWORD   SNOW_CUSTOM_TABLE=u_snow_incident_table
+# SNOW_CHANGE_TABLE=change_request (used by manage_change.py; --table overrides)
 # RAG_*: OLLAMA_HOST, OLLAMA_EMBED_MODEL, OLLAMA_CHAT_MODEL, RAG_CLOSED_STATUSES, RAG_TOP_K, RAG_MAX_ITERS
 # CUR_RUN_LIMIT / CUR_TOP_K       PG_CONN or PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
 ```
@@ -143,6 +146,33 @@ Views: **Dashboard** (landing) · **Connect** · **Incidents** · **Custom Table
 - **Current** — open tickets with triage, RCA + confidence, solution, supporting-ticket links; Run pipeline / Re-analyse.
 - **Agent chat** — ticket id or symptoms in; agentic ReAct with trace, or single-shot; thread history with Clear.
 - **Early Warn** — model details (IF calibration, RF scores) + one-click sample scoring (NORMAL / ANOMALOUS / FAILURE LIKELY).
+
+## Change Management
+
+Stock `change_request` table — no plugin install on a PDI. The OAuth/basic user needs `snc_platform_rest_api_access` + `itil`/`change_manager` + read/create/write ACLs on `change_request` (same setup as incidents, plus Change roles). `403` → Table > Application Access > allow web services / fix ACLs.
+
+`manage_change.py` mirrors `testServiceNow.py` auth (`SNOW_AUTH=bearer|basic`, `SNOW_GRANT_TYPE=password|client_credentials`) and targets `$SNOW_CHANGE_TABLE` (default `change_request`):
+
+```bash
+venv/bin/python manage_change.py check                          # probe access (enable verification)
+venv/bin/python manage_change.py list --limit 5                 # recent changes
+venv/bin/python manage_change.py create --short-description "Upgrade DB pool" \
+  --description "Increase max connections ahead of peak" \
+  --type Normal --category Software --risk 3 --impact 2          # only --short-description required
+venv/bin/python manage_change.py get --sys-id <32-char-sys_id>  # retrieve one change
+venv/bin/python manage_change.py update --sys-id <sys_id> --state "In Progress" --work-notes "started"
+venv/bin/python manage_change.py <cmd> --table change_task     # override table per call
+```
+
+Same via the running backend (generic custom-table routes, `./run.sh` + `POST /api/connect` first):
+
+```bash
+curl -X POST http://localhost:8090/api/custom/change_request -H 'Content-Type: application/json' \
+  -d '{"short_description":"Upgrade DB pool","type":"Normal"}'
+curl "http://localhost:8090/api/custom/change_request/<sys_id>"
+curl "http://localhost:8090/api/custom/change_request?limit=5&order_by=-sys_created_on"
+# or in the UI: Custom Table tab -> table name `change_request`
+```
 
 ## Knowledge Agent
 
@@ -174,7 +204,8 @@ Base `http://localhost:8090` (incident/custom routes need `POST /api/connect` fi
 
 ```
 ├── app.py                 # FastAPI backend (:8090)
-├── testServiceNow.py      # Minimal demo script
+├── testServiceNow.py      # Minimal incident demo script
+├── manage_change.py       # Change Management: check/list/create/get/update change_request
 ├── sync_to_pg.py          # Incident → Postgres mirror
 ├── rag_ingest.py          # Closed tickets → pgvector
 ├── triage_pipeline.py     # Open tickets → triage/RCA/solution
@@ -197,7 +228,7 @@ Base `http://localhost:8090` (incident/custom routes need `POST /api/connect` fi
 | `401` on `oauth_token.do` / `invalid_grant` | Wrong secret or grant disabled on the registry entry |
 | Bearer rejected by Table API | Known ServiceNow-side bearer-validation flakiness — use **Basic** mode |
 | Priority won't stick | Recalculated from Urgency × Impact — set those |
-| `403` on tables | Grant the OAuth user table ACLs / Application Access |
+| `403` on tables | Grant the OAuth user table ACLs / Application Access (`change_request` also needs `itil`/`change_manager`) |
 | RAG `502` / empty | Run `rag_ingest.py --once`; check Ollama + pgvector |
 | Agent slow (CPU LLM ~10 min/call) | Vague asks get instant clarifiers; use ticket ids + symptoms; quiet hours help |
 | PDI errors | Wake the instance at developer.servicenow.com |
